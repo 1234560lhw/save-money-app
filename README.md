@@ -357,3 +357,8 @@ pip 装一个包、一分钟出结果，适合"先要个能双击运行的 exe"�
 浅色区互相重叠，抠出来是一团糊。原图只有 1055px，猫只占约 250px，
 硬抠再放大只会更糟。所以最终**直接用猫 + 日落背景的方形构图**当图标，
 这本来就是一张完整好看的画。
+
+
+.venv\Scripts\python.exe scripts\dev_run.py                    # 桌面窗口
+.venv\Scripts\python.exe scripts\dev_run.py --target mobile     # 手机尺寸窗口
+.venv\Scripts\python.exe scripts\dev_run.py --web               # 浏览器预览 :8550

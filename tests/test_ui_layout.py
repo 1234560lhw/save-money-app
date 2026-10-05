@@ -21,6 +21,16 @@ class FakeOverlay(list):
     pass
 
 
+class FakeResizeEvent:
+    """模拟 flet 的 WindowResizeEvent（自带 width/height）。"""
+
+    def __init__(self, *, width: int, height: int, page=None):
+        self.width = width
+        self.height = height
+        self.page = page
+        self.control = None
+
+
 class FakePage:
     """只提供页面构建所需的最小接口。"""
 
@@ -34,7 +44,10 @@ class FakePage:
         self.spacing = 0
         self.appbar = None
         self.navigation_bar = None
-        self.on_resize = None
+        #: 真实视口尺寸（会被 resize 事件更新）
+        self.width = 0
+        self.height = 0
+        self.on_resized = None
         self.window = type("Window", (), {"width": width, "height": height})()
         self.overlay = FakeOverlay()
         self.opened: list = []
@@ -124,6 +137,36 @@ class TestShellLayout(DatabaseTestCase):
         background = page.controls[0].controls[0]
         self.assertEqual(background.height, 822)
 
+    def test_resize_handler_is_registered_with_correct_name(self):
+        """resize 回调必须挂在 ``on_resized`` 上。
+
+        回归背景：flet 的事件是动态属性，写成 ``page.on_resize`` 不会报错、
+        只会静默失效 —— 表现是缩放窗口/浏览器后背景不跟着铺满，露出白边。
+        """
+        page, _shell = self._mount()
+        self.assertIsNotNone(page.on_resized, "resize 回调没有注册（事件名写错了？）")
+
+    def test_background_follows_viewport_resize(self):
+        """视口变大后，背景层要跟着变大（否则底部露出底色）。"""
+        page, shell = self._mount(width=405, height=822)
+        background = page.controls[0].controls[0]
+        self.assertEqual(background.height, 822)
+
+        # 模拟浏览器窗口被拉大：page 尺寸变化 + resize 事件
+        page.width = 900
+        page.height = 1400
+        event = FakeResizeEvent(width=900, height=1400, page=page)
+        shell._on_page_resize(event)
+
+        background = page.controls[0].controls[0]
+        self.assertEqual(background.height, 1400, "背景高度没有跟随视口变化")
+
+    def test_size_falls_back_to_resize_event(self):
+        """page 与 window 都拿不到尺寸时，用最近一次 resize 事件的值。"""
+        page, shell = self._mount(width=0, height=0)
+        shell._last_viewport = (720, 1280)
+        self.assertEqual(shell._size(), (720, 1280))
+
     def test_content_follows_narrow_window(self):
         """内容区不能写死宽度，否则窄窗口下右侧会被裁掉。"""
         page, _shell = self._mount(width=405, height=822)
@@ -146,6 +189,33 @@ class TestShellLayout(DatabaseTestCase):
         padding = getattr(content, "padding", None)
         self.assertIsNotNone(padding)
         self.assertGreaterEqual(padding.bottom, theme.NAV_HEIGHT)
+
+    def test_scroll_is_on_the_shell_not_the_page(self):
+        """滚动手势必须由外壳的滚动容器承载。
+
+        回归背景：早期把 scroll 设在页面自己的 Column 上，而它的父级不是
+        滚动视图，手势被父级吃掉 —— 手机上表现为"页面滑不动"。
+        Container 在 flet 0.28.3 里没有 scroll 参数，所以必须是
+        ``Container > Column(scroll=...)`` 这个组合。
+        """
+        page, shell = self._mount()
+        _background, content = page.controls[0].controls
+
+        self.assertIsInstance(content, ft.Container)
+        # Container 不能有 scroll（0.28.3 不支持），滚动要放在内部的 Column 上
+        self.assertFalse(hasattr(content, "scroll") and getattr(content, "scroll", None),
+                         "Container 不支持 scroll，别写在这里")
+        inner = content.content
+        self.assertIsInstance(inner, ft.Column, "外壳内容容器里应当是滚动 Column")
+        self.assertEqual(inner.scroll, ft.ScrollMode.AUTO, "外壳的 Column 必须是可滚动的")
+
+        # 页面自己的根节点不应再重复设置滚动（避免嵌套滚动互相抢手势）
+        for index in range(4):
+            view = shell._view(index)
+            view.mark_dirty()
+            tree = view.build()
+            self.assertIsNone(getattr(tree, "scroll", None),
+                              f"第 {index} 个页面又自己设了滚动，会和外层抢手势")
 
     def test_all_four_views_render(self):
         page, shell = self._mount()

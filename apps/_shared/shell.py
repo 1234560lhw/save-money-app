@@ -48,6 +48,8 @@ class AppShell:
         self._nav: ft.NavigationBar | None = None
         self._bg: ft.Control | None = None
         self._root_stack: ft.Stack | None = None
+        #: 最近一次 resize 事件报告的视口尺寸，作为尺寸兜底
+        self._last_viewport: tuple[int, int] = (0, 0)
 
     # ------------------------------------------------------------ 生命周期
 
@@ -90,7 +92,9 @@ class AppShell:
         # 关键：page.add() 是竖直堆叠，背景和内容必须放进同一个 Stack 才能叠放
         self._bg = self._background_layer()
         self._root_stack = ft.Stack([self._bg, self._content_wrapper()])
-        self.page.on_resize = self._on_page_resize
+        # 注意事件名是 on_resized（不是 on_resize）。
+        # flet 的事件是动态属性，写错名字不会报错、只会静默失效。
+        self.page.on_resized = self._on_page_resize
         self.page.add(self._root_stack)
         self._render_current()
         self._sync_background_size()
@@ -99,10 +103,39 @@ class AppShell:
     # ------------------------------------------------------------ 背景层
 
     def _size(self) -> tuple[int, int]:
-        """当前窗口内容区尺寸（取不到时给一个合理默认值）。"""
-        window = getattr(self.page, "window", None)
-        width = int(getattr(window, "width", 0) or 0)
-        height = int(getattr(window, "height", 0) or 0)
+        """当前视口尺寸。
+
+        优先级：**page.width/height**（真实视口，会随窗口/浏览器缩放变化）
+        > ``window.width/height``（启动时写死的静态值） > 兜底默认值。
+
+        回归背景：早期只看 ``window.width/height``，而那两个值在浏览器里
+        永远是启动参数、不会随 F12 或窗口缩放变化，于是背景层高度固定，
+        页面一变大就露出白边。另外 ``page.on_resize`` 这个名字是错的
+        （正确为 ``on_resized``），导致尺寸同步回调从未被调用 —— 两个问题
+        叠加就是"深色背景没有铺满"。
+        """
+        def _positive(value: object) -> int:
+            try:
+                number = int(float(value))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return 0
+            return number if number > 0 else 0
+
+        # 1) 真实视口
+        width = _positive(getattr(self.page, "width", 0))
+        height = _positive(getattr(self.page, "height", 0))
+
+        # 2) 回退到窗口设定值
+        if not width or not height:
+            window = getattr(self.page, "window", None)
+            width = width or _positive(getattr(window, "width", 0))
+            height = height or _positive(getattr(window, "height", 0))
+
+        # 3) 再回退到最近一次 resize 事件报告的尺寸
+        if not width or not height:
+            width = width or _positive(self._last_viewport[0])
+            height = height or _positive(self._last_viewport[1])
+
         return max(width, 360), max(height, 640)
 
     def _sync_background_size(self) -> None:
@@ -119,7 +152,16 @@ class AppShell:
         if self.max_content_width:
             bg.width = width
 
-    def _on_page_resize(self, _event: ft.ControlEvent) -> None:
+    def _on_page_resize(self, event: ft.ControlEvent) -> None:
+        """视口尺寸变化：重新铺背景。
+
+        ``WindowResizeEvent`` 自带 width/height（flet 从事件 data 里解析），
+        优先用它，比再读一次 page 属性更可靠。
+        """
+        width = int(getattr(event, "width", 0) or 0)
+        height = int(getattr(event, "height", 0) or 0)
+        if width > 0 and height > 0:
+            self._last_viewport = (width, height)
         self._sync_background_size()
         self.page.update()
 
@@ -170,13 +212,38 @@ class AppShell:
         结果窗口比它窄时右侧被裁掉（手机上尤其明显）。现在一律跟随窗口宽度，
         靠内边距控制留白。
         """
+    def _content_wrapper(self) -> ft.Control:
+        """内容区：**滚动容器**，底部留出导航栏高度。
+
+        为什么要在这里承载滚动
+        ----------------------
+        页面自己的根节点（``BaseView.build()``）是一个 Column。如果滚动只
+        设在它身上，它的父级不是滚动视图时，触摸/滚轮的手势会被父级吃掉 ——
+        表现就是"手机上滑不动"。所以滚动放在外壳这一层：
+
+            Container(padding=四周留白)
+              └─ Column(scroll=AUTO)      <- 滚动手势在这里
+                   └─ 页面内容
+
+        注意：flet 0.28.3 的 ``Container`` **没有** ``scroll`` 参数，
+        必须用 ``Column``/``ListView`` 之类的可滚动控件来承载。
+        """
         padding = ft.padding.only(
             left=theme.PAD_M,
             right=theme.PAD_M,
             top=theme.PAD_S,
             bottom=theme.NAV_HEIGHT + theme.PAD_M,
         )
-        return ft.Container(content=self._body, expand=True, padding=padding)
+        return ft.Container(
+            content=ft.Column(
+                [self._body],
+                spacing=0,
+                scroll=ft.ScrollMode.AUTO,
+                horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            ),
+            expand=True,
+            padding=padding,
+        )
 
     # ------------------------------------------------------------ 导航
 

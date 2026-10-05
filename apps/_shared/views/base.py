@@ -52,10 +52,12 @@ class BaseView:
             self._dirty = False
         if self._error:
             return self.error_view(self._error)
+        # 这里**只负责排内容**：滚动交给外壳的滚动容器
+        # （apps/_shared/shell.py 的 _content_wrapper）。
+        # 早期版本在页面上也加了 scroll，但父级不是滚动视图，手势会被吃掉，
+        # 手机上表现为"滑不动"。
         return ft.Column(
             [self.render()],
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
             spacing=0,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
