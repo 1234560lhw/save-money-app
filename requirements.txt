@@ -1,0 +1,11 @@
+# 存钱罐 · 运行依赖
+# 安装方式见 docs/环境搭建.md（受限沙箱下用 scripts/install_deps.py）
+
+# UI 框架：同一套代码可打包为 Windows 桌面程序与 Android APK
+flet==0.28.3
+
+# 说明：
+#   * 数据库使用标准库 sqlite3，无需额外依赖；
+#   * 金额计算使用标准库 decimal，避免浮点误差；
+#   * 加密（第二阶段密码锁）使用标准库 hashlib，无需额外依赖；
+#   * 打包工具（flet build）在打包阶段单独安装，不进运行依赖。

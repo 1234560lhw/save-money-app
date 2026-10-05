@@ -1,0 +1,26 @@
+# 虚拟环境
+.venv/
+venv/
+
+# 打包输出
+dist/
+build/
+
+# 工具缓存
+.devdata/
+.tmp/
+.toolchain/
+
+# vscode本地配置
+.vscode/
+
+# python缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# 系统文件
+Thumbs.db
+.DS_Store
