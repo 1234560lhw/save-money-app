@@ -23,9 +23,9 @@ jobs:
 
       - name: Build APK
         run: |
-          flet build apk apps/mobile/app_entry.py --android-signing
+          flet build apk apps/mobile/app_entry.py
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-apk
